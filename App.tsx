@@ -71,7 +71,7 @@ const App: React.FC = () => {
           <div className="flex flex-col items-center justify-center h-full space-y-8 p-8 text-center bg-cover bg-center" style={{backgroundImage: 'linear-gradient(rgba(0,0,0,0.8), rgba(0,0,0,0.8))'}}>
              <div className="space-y-2">
                 <h1 className="text-6xl md:text-8xl font-black text-white tracking-tighter uppercase italic drop-shadow-[0_5px_5px_rgba(255,0,0,0.8)]">
-                  Barn Burner
+                  Bardownski
                 </h1>
                 <h2 className="text-2xl text-cyan-400 font-bold tracking-widest uppercase">Rink Rat Dynasty</h2>
              </div>
