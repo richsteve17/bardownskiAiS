@@ -17,17 +17,20 @@ const INITIAL_TEAM: Team = {
     {
       id: '1', name: 'Shoresy', nickname: 'Waffle', class: PlayerClass.SNIPER, 
       stats: { speed: 85, shooting: 90, physicality: 60, chirp: 99 }, 
-      salary: 10000, bio: 'Hates to lose.', energy: 100 
+      salary: 10000, bio: 'Hates to lose.', energy: 100,
+      gameStats: { swagger: 0, heat: 0, trust: 0, chemistry: 0 }
     },
     {
         id: '2', name: 'J.J. Frankie JJ', nickname: 'Big Sexy', class: PlayerClass.PLAYMAKER,
         stats: { speed: 70, shooting: 80, physicality: 50, chirp: 40 },
-        salary: 12000, bio: 'Absolute unit.', energy: 100
+        salary: 12000, bio: 'Absolute unit.', energy: 100,
+        gameStats: { swagger: 0, heat: 0, trust: 0, chemistry: 0 }
     },
     {
         id: '3', name: 'Hitch', nickname: 'Ten Inch', class: PlayerClass.ENFORCER,
         stats: { speed: 60, shooting: 50, physicality: 95, chirp: 80 },
-        salary: 8000, bio: 'Looks like a martial artist.', energy: 100
+        salary: 8000, bio: 'Looks like a martial artist.', energy: 100,
+        gameStats: { swagger: 0, heat: 0, trust: 0, chemistry: 0 }
     }
   ]
 };

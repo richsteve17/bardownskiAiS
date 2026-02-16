@@ -1,7 +1,10 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Player, PlayerClass, Team } from '../types';
 import { generateCommentary } from '../services/geminiService';
 import { Button } from './Button';
+import { GameHUD } from './GameHUD';
+import { ScrapEngine } from './ScrapEngine';
 
 interface MatchViewProps {
   playerTeam: Team;
@@ -17,8 +20,10 @@ interface Entity {
   vel: Vector;
   team: 'home' | 'away';
   role: PlayerClass;
-  cooldowns: { speed: number; check: number; chirp: number };
+  cooldowns: { turbo: number; shield: number; chaos: number; check: number; chirp: number };
   isStunned: number;
+  isShielded: number; // New: Shield ability
+  gameStats: { swagger: number; heat: number; trust: number; chemistry: number }; // New: Game stats
 }
 
 // Physics Constants - Tuned for slower gameplay
@@ -28,23 +33,27 @@ const PUCK_FRICTION = 0.985;
 const ICE_FRICTION = 0.92; // Higher drag to slow players down
 const SHOOT_FORCE = 1.8;
 const MAX_SPEED = 0.8; // Cap maximum speed
-const HUSTLE_MULT = 1.5;
 
 export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName, onMatchEnd }) => {
   const [score, setScore] = useState({ home: 0, away: 0 });
   const [time, setTime] = useState(180);
   const [commentary, setCommentary] = useState("Use ARROWS to Move, SPACE to Shoot!");
   const [gameEntities, setGameEntities] = useState<Entity[]>([]);
-  
+  const [isScrapActive, setIsScrapActive] = useState(false);
+  const [scrapEnforcer1, setScrapEnforcer1] = useState<string>('');
+  const [scrapEnforcer2, setScrapEnforcer2] = useState<string>('');
+
   // Game State Refs (for loop performance)
   const entitiesRef = useRef<Entity[]>([]);
   const puckRef = useRef<Vector>({ x: 50, y: 50 });
   const puckVelRef = useRef<Vector>({ x: 0, y: 0 });
   const puckOwnerRef = useRef<string | null>(null);
-  
+  const scrapCooldownRef = useRef<number>(0);
+
   const keysRef = useRef<Set<string>>(new Set());
   const requestRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+  const userCooldownsRef = useRef({ turbo: 0, shield: 0, chaos: 0 });
 
   // Initialize
   useEffect(() => {
@@ -57,12 +66,14 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
         vel: { x: 0, y: 0 },
         team: 'home' as const,
         role: p.class,
-        cooldowns: { speed: 0, check: 0, chirp: 0 },
-        isStunned: 0
+        cooldowns: { turbo: 0, shield: 0, chaos: 0, check: 0, chirp: 0 },
+        isStunned: 0,
+        isShielded: 0,
+        gameStats: { ...p.gameStats } // Initialize gameStats from playerTeam
       })),
-      { id: 'e1', pos: { x: 80, y: 30 }, vel: { x: 0, y: 0 }, team: 'away' as const, role: PlayerClass.SNIPER, cooldowns: { speed: 0, check: 0, chirp: 0 }, isStunned: 0 },
-      { id: 'e2', pos: { x: 80, y: 50 }, vel: { x: 0, y: 0 }, team: 'away' as const, role: PlayerClass.ENFORCER, cooldowns: { speed: 0, check: 0, chirp: 0 }, isStunned: 0 },
-      { id: 'e3', pos: { x: 80, y: 70 }, vel: { x: 0, y: 0 }, team: 'away' as const, role: PlayerClass.GOALIE, cooldowns: { speed: 0, check: 0, chirp: 0 }, isStunned: 0 },
+      { id: 'e1', pos: { x: 80, y: 30 }, vel: { x: 0, y: 0 }, team: 'away' as const, role: PlayerClass.SNIPER, cooldowns: { turbo: 0, shield: 0, chaos: 0, check: 0, chirp: 0 }, isStunned: 0, isShielded: 0, gameStats: { swagger: 0, heat: 0, trust: 0, chemistry: 0 } },
+      { id: 'e2', pos: { x: 80, y: 50 }, vel: { x: 0, y: 0 }, team: 'away' as const, role: PlayerClass.ENFORCER, cooldowns: { turbo: 0, shield: 0, chaos: 0, check: 0, chirp: 0 }, isStunned: 0, isShielded: 0, gameStats: { swagger: 0, heat: 0, trust: 0, chemistry: 0 } },
+      { id: 'e3', pos: { x: 80, y: 70 }, vel: { x: 0, y: 0 }, team: 'away' as const, role: PlayerClass.GOALIE, cooldowns: { turbo: 0, shield: 0, chaos: 0, check: 0, chirp: 0 }, isStunned: 0, isShielded: 0, gameStats: { swagger: 0, heat: 0, trust: 0, chemistry: 0 } },
     ];
     
     entitiesRef.current = initialEntities;
@@ -85,20 +96,31 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
     if (!lastTimeRef.current) lastTimeRef.current = timestamp;
     lastTimeRef.current = timestamp;
 
+    if (isScrapActive) {
+      requestRef.current = requestAnimationFrame(update);
+      return;
+    }
+
     if (time <= 0) {
         cancelAnimationFrame(requestRef.current!);
         onMatchEnd(score.home > score.away);
         return;
     }
 
+    // Decrement overall match time
+    setTime(prev => Math.max(0, prev - (1/60))); // Assuming 60fps
+
     // 1. Process User Input (Controls the first home player)
-    const userPlayer = entitiesRef.current.find(e => e.team === 'home');
+    const userPlayer = entitiesRef.current.find(e => e.team === 'home' && playerTeam.roster.some(p => p.id === e.id));
     if (userPlayer && userPlayer.isStunned <= 0) {
+        const playerSwagger = userPlayer.gameStats.swagger;
+        const currentPLAYER_ACCEL = PLAYER_ACCEL * (1 + (playerSwagger / 100) * 0.5);
+
         // Movement
-        if (keysRef.current.has('ArrowUp')) userPlayer.vel.y -= PLAYER_ACCEL;
-        if (keysRef.current.has('ArrowDown')) userPlayer.vel.y += PLAYER_ACCEL;
-        if (keysRef.current.has('ArrowLeft')) userPlayer.vel.x -= PLAYER_ACCEL;
-        if (keysRef.current.has('ArrowRight')) userPlayer.vel.x += PLAYER_ACCEL;
+        if (keysRef.current.has('ArrowUp')) userPlayer.vel.y -= currentPLAYER_ACCEL;
+        if (keysRef.current.has('ArrowDown')) userPlayer.vel.y += currentPLAYER_ACCEL;
+        if (keysRef.current.has('ArrowLeft')) userPlayer.vel.x -= currentPLAYER_ACCEL;
+        if (keysRef.current.has('ArrowRight')) userPlayer.vel.x += currentPLAYER_ACCEL;
 
         // Shooting / Passing
         if (keysRef.current.has('Space') && puckOwnerRef.current === userPlayer.id) {
@@ -107,28 +129,44 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
         }
 
         // Abilities
-        if (keysRef.current.has('KeyQ') && userPlayer.cooldowns.speed <= 0) {
-            // Hustle
-            userPlayer.vel.x *= HUSTLE_MULT; 
-            userPlayer.vel.y *= HUSTLE_MULT;
-            userPlayer.cooldowns.speed = 300; // frames
+        // Q: Turbo (1.5x speed, 2s duration, 5s cooldown)
+        if (keysRef.current.has('KeyQ') && userCooldownsRef.current.turbo <= 0) {
+            userPlayer.vel.x *= 1.5; 
+            userPlayer.vel.y *= 1.5;
+            userCooldownsRef.current.turbo = 300; // 5 seconds * 60 frames/sec
             generateCommentary("Turnin' on the jets!").then(setCommentary);
         }
-        if (keysRef.current.has('KeyE') && userPlayer.cooldowns.check <= 0) {
-            // Check (Dash forward)
-            userPlayer.vel.x += 1.0; // Reduced dash force
-            userPlayer.cooldowns.check = 180;
-             // Logic to stun touched enemies handled in collision
+        // W: Shield (Immunity, 1.5s duration, 8s cooldown)
+        if (keysRef.current.has('KeyW') && userCooldownsRef.current.shield <= 0) {
+            userPlayer.isShielded = 90; // 1.5 seconds * 60 frames/sec
+            userCooldownsRef.current.shield = 480; // 8 seconds * 60 frames/sec
+            generateCommentary("Shields up!").then(setCommentary);
+        }
+        // E: Chaos (Class-specific placeholder, 12s cooldown)
+        if (keysRef.current.has('KeyE') && userCooldownsRef.current.chaos <= 0) {
+            // Placeholder for class-specific Chaos ability
+            generateCommentary("Chaos unleashed!").then(setCommentary);
+            userCooldownsRef.current.chaos = 720; // 12 seconds * 60 frames/sec
         }
     }
 
     // 2. AI Logic & Physics for all entities
     entitiesRef.current.forEach(ent => {
-        // Cooldowns / Stuns
+        // Cooldowns / Stuns / Shields
         if (ent.isStunned > 0) ent.isStunned--;
-        if (ent.cooldowns.speed > 0) ent.cooldowns.speed--;
+        if (ent.isShielded > 0) ent.isShielded--;
+        if (ent.cooldowns.turbo > 0) ent.cooldowns.turbo--;
+        if (ent.cooldowns.shield > 0) ent.cooldowns.shield--;
+        if (ent.cooldowns.chaos > 0) ent.cooldowns.chaos--;
         if (ent.cooldowns.check > 0) ent.cooldowns.check--;
         if (ent.cooldowns.chirp > 0) ent.cooldowns.chirp--;
+
+        // Update user cooldowns for HUD
+        if (ent.id === userPlayer?.id) {
+          userCooldownsRef.current.turbo = ent.cooldowns.turbo;
+          userCooldownsRef.current.shield = ent.cooldowns.shield;
+          userCooldownsRef.current.chaos = ent.cooldowns.chaos;
+        }
 
         if (ent.isStunned > 0) {
             ent.vel.x = 0; ent.vel.y = 0;
@@ -139,15 +177,30 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
         if (ent.id !== userPlayer?.id) {
             let target = { x: puckRef.current.x, y: puckRef.current.y };
             
-            // Goalie Logic
+            // Goalie Logic: Track puck at goal line
             if (ent.role === PlayerClass.GOALIE) {
                 target = { x: ent.team === 'home' ? 5 : 95, y: puckRef.current.y };
                 if (target.y < 35) target.y = 35;
                 if (target.y > 65) target.y = 65;
             } 
-            // Teammate Logic (if teammate has puck, move forward, else chase puck)
+            // Teammate Logic (if teammate has puck, move to net)
             else if (puckOwnerRef.current && entitiesRef.current.find(e => e.id === puckOwnerRef.current)?.team === ent.team) {
                 target = { x: ent.team === 'home' ? 90 : 10, y: ent.pos.y }; // Move to net
+            }
+            // Opponent Logic: Pressure puck carrier
+            else if (puckOwnerRef.current && entitiesRef.current.find(e => e.id === puckOwnerRef.current)?.team !== ent.team) {
+                const puckOwner = entitiesRef.current.find(e => e.id === puckOwnerRef.current);
+                if (puckOwner) target = { x: puckOwner.pos.x, y: puckOwner.pos.y };
+            }
+
+            // Sully Tilted (Heat > 70) - forces aggressive shooting
+            if (ent.gameStats.heat > 70 && puckOwnerRef.current === ent.id) {
+                const goalX = ent.team === 'home' ? 100 : 0;
+                if (Math.random() < 0.05) { // 5% chance to shoot per frame
+                    shootPuck(ent);
+                    generateCommentary("Sully's TILTED! He's just firing pucks!").then(setCommentary);
+                }
+                target = { x: goalX, y: 50 }; // Force target to goal
             }
 
             // Move towards target
@@ -162,10 +215,8 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
 
             // AI Shooting
             if (puckOwnerRef.current === ent.id) {
-                // Shoot if close to goal
                 const goalX = ent.team === 'home' ? 100 : 0;
                 if (Math.abs(ent.pos.x - goalX) < 40) {
-                    // Random delay or check
                     if (Math.random() < 0.02) shootPuck(ent); // Slower shooting frequency
                 }
             }
@@ -177,9 +228,10 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
 
         // Clamp Speed
         const speed = Math.hypot(ent.vel.x, ent.vel.y);
-        if (speed > MAX_SPEED) {
-            ent.vel.x = (ent.vel.x / speed) * MAX_SPEED;
-            ent.vel.y = (ent.vel.y / speed) * MAX_SPEED;
+        const maxSpeedWithSwagger = MAX_SPEED * (1 + (ent.gameStats.swagger / 100) * 0.5);
+        if (speed > maxSpeedWithSwagger) {
+            ent.vel.x = (ent.vel.x / speed) * maxSpeedWithSwagger;
+            ent.vel.y = (ent.vel.y / speed) * maxSpeedWithSwagger;
         }
 
         // Apply Velocity
@@ -207,7 +259,26 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
                  generateCommentary("Turnover!").then(setCommentary);
              }
         }
+
+        // Scrap detection on enforcer collision
+        if (ent.role === PlayerClass.ENFORCER && ent.team === 'home' && scrapCooldownRef.current <= 0) {
+          const otherEnforcers = entitiesRef.current.filter(e => e.role === PlayerClass.ENFORCER && e.team === 'away');
+          for (const otherEnforcer of otherEnforcers) {
+            const distBetweenEnforcers = Math.hypot(ent.pos.x - otherEnforcer.pos.x, ent.pos.y - otherEnforcer.pos.y);
+            if (distBetweenEnforcers < 5) {
+              setIsScrapActive(true);
+              setScrapEnforcer1(playerTeam.roster.find(p => p.id === ent.id)?.name || 'Home Enforcer');
+              setScrapEnforcer2(enemyTeamName + ' Enforcer'); // Generic name for enemy enforcer
+              scrapCooldownRef.current = 600; // 10 seconds cooldown
+              generateCommentary("A scrap has broken out!").then(setCommentary);
+              break;
+            }
+          }
+        }
     });
+
+    // Decrement scrap cooldown
+    if (scrapCooldownRef.current > 0) scrapCooldownRef.current--;
 
     // 3. Puck Physics
     if (puckOwnerRef.current) {
@@ -261,6 +332,10 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
       // Calculate angle to goal but add some randomness based on velocity
       let angle = Math.atan2(goalY - shooter.pos.y, goalX - shooter.pos.x);
       
+      // Apply chemistry effect on shot angle randomness
+      const chemistryEffect = (100 - shooter.gameStats.chemistry) / 100; // 0 to 1, lower chemistry = more randomness
+      angle += (Math.random() - 0.5) * 0.2 * chemistryEffect;
+
       // If moving fast, bias towards movement direction
       if (Math.hypot(shooter.vel.x, shooter.vel.y) > 0.1) {
           const moveAngle = Math.atan2(shooter.vel.y, shooter.vel.x);
@@ -278,10 +353,12 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
     puckVelRef.current = { x: 0, y: 0 };
     puckOwnerRef.current = null;
     
-    // Reset players slightly
+    // Reset players slightly and their gameStats
     entitiesRef.current.forEach((e, i) => {
          e.vel = { x: 0, y: 0 };
          e.isStunned = 0;
+         e.isShielded = 0;
+         e.gameStats = { swagger: 0, heat: 0, trust: 0, chemistry: 0 }; // Reset gameStats
          if (e.team === 'home') {
              e.pos = { x: 20, y: 30 + (i * 20) };
          } else {
@@ -291,110 +368,88 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
   };
 
   useEffect(() => {
-    const timer = setInterval(() => {
-        setTime(t => Math.max(0, t - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     requestRef.current = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(requestRef.current!);
-  }, [time]);
+    return () => cancelAnimationFrame(requestRef.current!); 
+  }, [score, time, isScrapActive]); // Re-run effect if score or time changes
 
-  // Helpers for UI
-  const userPlayer = gameEntities.find(e => e.team === 'home');
+  const userPlayerForHUD = playerTeam.roster.find(p => p.id === entitiesRef.current.find(e => e.team === 'home' && playerTeam.roster.some(p => p.id === e.id))?.id);
+
+  const handleScrapEnd = () => {
+    setIsScrapActive(false);
+    generateCommentary("The dust settles... for now.").then(setCommentary);
+  };
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 text-white p-4 select-none outline-none" tabIndex={0}>
-      {/* HUD */}
-      <div className="flex justify-between items-center bg-black/50 p-4 border-b-4 border-cyan-500 mb-4 rounded-lg">
-        <div className="text-4xl font-black text-cyan-400">{playerTeam.name} <span className="text-white">{score.home}</span></div>
-        <div className="flex flex-col items-center">
-            <div className="text-3xl font-mono bg-gray-800 px-4 py-1 rounded border border-gray-600">
-                {Math.floor(time / 60)}:{(time % 60).toString().padStart(2, '0')}
-            </div>
-            <div className="text-xs uppercase text-gray-400 mt-1">Period 3</div>
+    <div className="relative w-full h-full bg-gradient-to-b from-gray-800 to-gray-900 overflow-hidden">
+      {/* Ice Rink */}
+      <div className="absolute inset-0 bg-blue-200 opacity-20"></div>
+      <div className="absolute inset-y-0 left-1/2 w-1 bg-white opacity-50"></div> {/* Center Line */}
+      <div className="absolute inset-y-0 left-[5%] w-1 bg-red-500 opacity-50"></div> {/* Home Goal Line */}
+      <div className="absolute inset-y-0 right-[5%] w-1 bg-red-500 opacity-50"></div> {/* Away Goal Line */}
+
+      {/* Puck */}
+      <div
+        className="absolute w-2 h-2 rounded-full bg-black border border-gray-400"
+        style={{
+          left: `${puckRef.current.x}%`,
+          top: `${puckRef.current.y}%`,
+          transform: 'translate(-50%, -50%)',
+        }}
+      ></div>
+
+      {/* Players */}
+      {gameEntities.map(entity => (
+        <div
+          key={entity.id}
+          className={`absolute w-4 h-4 rounded-full flex items-center justify-center font-bold text-xs
+            ${entity.team === 'home' ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'}
+            ${entity.isStunned > 0 ? 'opacity-50 animate-pulse' : ''}
+            ${entity.isShielded > 0 ? 'border-2 border-yellow-400' : ''}
+          `}
+          style={{
+            left: `${entity.pos.x}%`,
+            top: `${entity.pos.y}%`,
+            transform: 'translate(-50%, -50%)',
+          }}
+        >
+          {entity.role === PlayerClass.SNIPER && 'S'}
+          {entity.role === PlayerClass.ENFORCER && 'E'}
+          {entity.role === PlayerClass.PLAYMAKER && 'P'}
+          {entity.role === PlayerClass.GOALIE && 'G'}
         </div>
-        <div className="text-4xl font-black text-red-500"><span className="text-white">{score.away}</span> {enemyTeamName}</div>
-      </div>
+      ))}
 
-      {/* RINK */}
-      <div className="flex-1 relative bg-blue-100 rounded-xl border-4 border-slate-700 overflow-hidden shadow-inner cursor-none">
-        {/* Ice Markings */}
-        <div className="absolute top-0 bottom-0 left-1/2 w-1 bg-red-500/30 transform -translate-x-1/2"></div>
-        <div className="absolute top-1/2 left-1/2 w-24 h-24 border-4 border-blue-500/30 rounded-full transform -translate-x-1/2 -translate-y-1/2"></div>
-        
-        {/* Goals */}
-        <div className="absolute top-1/2 left-0 w-2 h-20 bg-red-600 transform -translate-y-1/2"></div>
-        <div className="absolute top-1/2 right-0 w-2 h-20 bg-red-600 transform -translate-y-1/2"></div>
-
-        {/* Info Overlay */}
-        <div className="absolute top-4 left-4 z-20 text-xs font-mono text-slate-500 pointer-events-none">
-            <p>[ARROWS] SKATE</p>
-            <p>[SPACE] SHOOT</p>
-            <p>[Q] HUSTLE</p>
-        </div>
-
-        {/* Puck */}
-        <div 
-            className="absolute w-3 h-3 bg-black rounded-full shadow-sm z-10"
-            style={{ 
-                left: `${puckRef.current.x}%`, 
-                top: `${puckRef.current.y}%`,
-                transform: 'translate(-50%, -50%)',
-                boxShadow: '0 0 10px rgba(0,0,0,0.5)'
-            }}
+      {userPlayerForHUD && (
+        <GameHUD
+          player={userPlayerForHUD}
+          score={score}
+          time={time}
+          commentary={commentary}
+          cooldowns={userCooldownsRef.current}
         />
+      )}
 
-        {/* Players */}
-        {gameEntities.map(ent => (
-             <div 
-                key={ent.id}
-                className={`absolute w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs border-2 shadow-lg transition-transform
-                    ${ent.team === 'home' ? 'bg-cyan-600 border-cyan-300 text-white' : 'bg-red-700 border-red-400 text-white'}
-                    ${ent.id === puckOwnerRef.current ? 'ring-4 ring-yellow-400' : ''}
-                    ${ent.id === userPlayer?.id ? 'ring-2 ring-white scale-110 z-20' : ''}
-                    ${ent.isStunned > 0 ? 'opacity-50 animate-pulse' : ''}
-                `}
-                style={{ 
-                    left: `${ent.pos.x}%`, 
-                    top: `${ent.pos.y}%`,
-                    transform: `translate(-50%, -50%) rotate(${Math.atan2(ent.vel.y, ent.vel.x)}rad)`
-                }}
-            >
-                {ent.role === PlayerClass.GOALIE ? 'G' : ent.role[0]}
-                {/* Indicator arrow for user */}
-                {ent.id === userPlayer?.id && (
-                    <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 text-yellow-400 text-[10px] font-black tracking-tighter">YOU</div>
-                )}
-            </div>
-        ))}
-      </div>
+      {isScrapActive && (
+        <ScrapEngine
+          enforcer1Name={scrapEnforcer1}
+          enforcer2Name={scrapEnforcer2}
+          onScrapEnd={handleScrapEnd}
+        />
+      )}
 
-      {/* Control Panel / Cooldowns */}
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 h-24">
-         {/* Commentary */}
-         <div className="md:col-span-2 bg-black border border-green-500/50 p-4 rounded font-mono text-green-400 text-sm overflow-hidden flex items-center">
-            <span className="mr-2 animate-pulse">▐</span> {commentary}
-         </div>
-
-         {/* Ability Icons */}
-         <div className="grid grid-cols-3 gap-2">
-            <div className={`flex flex-col items-center justify-center bg-gray-800 rounded border-2 ${userPlayer?.cooldowns.speed ? 'border-gray-600 opacity-50' : 'border-yellow-500'}`}>
-                <span className="font-bold text-yellow-500 text-xl">Q</span>
-                <span className="text-[10px] uppercase text-gray-400">Hustle</span>
-            </div>
-             <div className={`flex flex-col items-center justify-center bg-gray-800 rounded border-2 ${userPlayer?.cooldowns.check ? 'border-gray-600 opacity-50' : 'border-red-500'}`}>
-                <span className="font-bold text-red-500 text-xl">W</span>
-                <span className="text-[10px] uppercase text-gray-400">Stun</span>
-            </div>
-             <div className="flex flex-col items-center justify-center bg-gray-800 rounded border-2 border-gray-600 opacity-50">
-                <span className="font-bold text-gray-500 text-xl">E</span>
-                <span className="text-[10px] uppercase text-gray-400">Chirp</span>
-            </div>
-         </div>
-      </div>
+      {/* Game Over Overlay */}
+      {time === 0 && (
+        <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-40">
+          <div className="text-center">
+            <h2 className="text-6xl font-black text-white mb-4">
+              {score.home > score.away ? 'VICTORY!' : 'DEFEAT!'}
+            </h2>
+            <Button onClick={() => onMatchEnd(score.home > score.away)}>
+              Continue
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
