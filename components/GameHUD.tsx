@@ -8,6 +8,8 @@ interface GameHUDProps {
   time: number;
   commentary: string;
   cooldowns: { turbo: number; shield: number; chaos: number };
+  onShoot: () => void;
+  onPass: () => void;
 }
 
 const StatBar: React.FC<{ label: string; value: number; color: string }> = ({ label, value, color }) => (
@@ -15,7 +17,7 @@ const StatBar: React.FC<{ label: string; value: number; color: string }> = ({ la
     <div
       className={`h-2.5 rounded-full ${color}`}
       style={{ width: `${Math.max(0, Math.min(100, value + 50))}%
-` }} // Adjust for -50 to +50 range
+` }}
     ></div>
     <span className="text-xs text-gray-300 absolute -bottom-4 left-0 right-0 text-center">
       {label}: {value}
@@ -40,7 +42,7 @@ const CooldownBar: React.FC<{ label: string; cooldown: number; maxCooldown: numb
   );
 };
 
-export const GameHUD: React.FC<GameHUDProps> = ({ player, score, time, commentary, cooldowns }) => {
+export const GameHUD: React.FC<GameHUDProps> = ({ player, score, time, commentary, cooldowns, onShoot, onPass }) => {
   const minutes = Math.floor(time / 60);
   const seconds = time % 60;
 
@@ -83,6 +85,22 @@ export const GameHUD: React.FC<GameHUDProps> = ({ player, score, time, commentar
           <CooldownBar label="W: Shield" cooldown={cooldowns.shield} maxCooldown={480} color="bg-green-500" />
           <CooldownBar label="E: Chaos" cooldown={cooldowns.chaos} maxCooldown={720} color="bg-red-500" />
         </div>
+      </div>
+
+      {/* Mobile Touch Controls - Shoot & Pass Buttons */}
+      <div className="fixed bottom-4 right-4 flex gap-2 pointer-events-auto">
+        <button
+          onClick={onPass}
+          className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg text-lg shadow-lg active:scale-95 transition-transform"
+        >
+          PASS (P)
+        </button>
+        <button
+          onClick={onShoot}
+          className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg text-lg shadow-lg active:scale-95 transition-transform"
+        >
+          SHOOT (SPACE)
+        </button>
       </div>
     </div>
   );

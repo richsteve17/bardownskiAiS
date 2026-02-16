@@ -22,22 +22,22 @@ interface Entity {
   role: PlayerClass;
   cooldowns: { turbo: number; shield: number; chaos: number; check: number; chirp: number };
   isStunned: number;
-  isShielded: number;
-  gameStats: { swagger: number; heat: number; trust: number; chemistry: number };
+  isShielded: number; // New: Shield ability
+  gameStats: { swagger: number; heat: number; trust: number; chemistry: number }; // New: Game stats
 }
 
 // Physics Constants - Tuned for slower gameplay
 const PLAYER_ACCEL = 0.025;
 const AI_ACCEL = 0.015;
 const PUCK_FRICTION = 0.985;
-const ICE_FRICTION = 0.92;
+const ICE_FRICTION = 0.92; // Higher drag to slow players down
 const SHOOT_FORCE = 1.8;
-const MAX_SPEED = 0.8;
+const MAX_SPEED = 0.8; // Cap maximum speed
 
 export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName, onMatchEnd }) => {
   const [score, setScore] = useState({ home: 0, away: 0 });
   const [time, setTime] = useState(180);
-  const [commentary, setCommentary] = useState("Use ARROWS to Move, SPACE to Shoot, P to Pass!");
+  const [commentary, setCommentary] = useState("Use ARROWS to Move, SPACE to Shoot!");
   const [gameEntities, setGameEntities] = useState<Entity[]>([]);
   const [isScrapActive, setIsScrapActive] = useState(false);
   const [scrapEnforcer1, setScrapEnforcer1] = useState<string>('');
@@ -70,7 +70,7 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
         cooldowns: { turbo: 0, shield: 0, chaos: 0, check: 0, chirp: 0 },
         isStunned: 0,
         isShielded: 0,
-        gameStats: { ...p.gameStats }
+        gameStats: { ...p.gameStats } // Initialize gameStats from playerTeam
       })),
       { id: 'e1', pos: { x: 80, y: 30 }, vel: { x: 0, y: 0 }, team: 'away' as const, role: PlayerClass.SNIPER, cooldowns: { turbo: 0, shield: 0, chaos: 0, check: 0, chirp: 0 }, isStunned: 0, isShielded: 0, gameStats: { swagger: 0, heat: 0, trust: 0, chemistry: 0 } },
       { id: 'e2', pos: { x: 80, y: 50 }, vel: { x: 0, y: 0 }, team: 'away' as const, role: PlayerClass.ENFORCER, cooldowns: { turbo: 0, shield: 0, chaos: 0, check: 0, chirp: 0 }, isStunned: 0, isShielded: 0, gameStats: { swagger: 0, heat: 0, trust: 0, chemistry: 0 } },
@@ -109,7 +109,7 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
     }
 
     // Decrement overall match time
-    setTime(prev => Math.max(0, prev - (1/60)));
+    setTime(prev => Math.max(0, prev - (1/60))); // Assuming 60fps
 
     // 1. Process User Input (Controls the first home player)
     const userPlayer = entitiesRef.current.find(e => e.team === 'home' && playerTeam.roster.some(p => p.id === e.id));
@@ -132,7 +132,7 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
         // Passing (P key)
         if (keysRef.current.has('KeyP') && puckOwnerRef.current === userPlayer.id && passCooldownRef.current <= 0) {
              passPuck(userPlayer);
-             passCooldownRef.current = 30;
+             passCooldownRef.current = 30; // 0.5 second cooldown
         }
 
         // Abilities
@@ -140,19 +140,20 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
         if (keysRef.current.has('KeyQ') && userCooldownsRef.current.turbo <= 0) {
             userPlayer.vel.x *= 1.5; 
             userPlayer.vel.y *= 1.5;
-            userCooldownsRef.current.turbo = 300;
+            userCooldownsRef.current.turbo = 300; // 5 seconds * 60 frames/sec
             generateCommentary("Turnin' on the jets!").then(setCommentary);
         }
         // W: Shield (Immunity, 1.5s duration, 8s cooldown)
         if (keysRef.current.has('KeyW') && userCooldownsRef.current.shield <= 0) {
-            userPlayer.isShielded = 90;
-            userCooldownsRef.current.shield = 480;
+            userPlayer.isShielded = 90; // 1.5 seconds * 60 frames/sec
+            userCooldownsRef.current.shield = 480; // 8 seconds * 60 frames/sec
             generateCommentary("Shields up!").then(setCommentary);
         }
         // E: Chaos (Class-specific placeholder, 12s cooldown)
         if (keysRef.current.has('KeyE') && userCooldownsRef.current.chaos <= 0) {
+            // Placeholder for class-specific Chaos ability
             generateCommentary("Chaos unleashed!").then(setCommentary);
-            userCooldownsRef.current.chaos = 720;
+            userCooldownsRef.current.chaos = 720; // 12 seconds * 60 frames/sec
         }
     }
 
@@ -191,7 +192,7 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
             } 
             // Teammate Logic (if teammate has puck, move to net)
             else if (puckOwnerRef.current && entitiesRef.current.find(e => e.id === puckOwnerRef.current)?.team === ent.team) {
-                target = { x: ent.team === 'home' ? 90 : 10, y: ent.pos.y };
+                target = { x: ent.team === 'home' ? 90 : 10, y: ent.pos.y }; // Move to net
             }
             // Opponent Logic: Pressure puck carrier
             else if (puckOwnerRef.current && entitiesRef.current.find(e => e.id === puckOwnerRef.current)?.team !== ent.team) {
@@ -202,11 +203,11 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
             // Sully Tilted (Heat > 70) - forces aggressive shooting
             if (ent.gameStats.heat > 70 && puckOwnerRef.current === ent.id) {
                 const goalX = ent.team === 'home' ? 100 : 0;
-                if (Math.random() < 0.05) {
+                if (Math.random() < 0.05) { // 5% chance to shoot per frame
                     shootPuck(ent);
                     generateCommentary("Sully's TILTED! He's just firing pucks!").then(setCommentary);
                 }
-                target = { x: goalX, y: 50 };
+                target = { x: goalX, y: 50 }; // Force target to goal
             }
 
             // Move towards target
@@ -223,7 +224,7 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
             if (puckOwnerRef.current === ent.id) {
                 const goalX = ent.team === 'home' ? 100 : 0;
                 if (Math.abs(ent.pos.x - goalX) < 40) {
-                    if (Math.random() < 0.02) shootPuck(ent);
+                    if (Math.random() < 0.02) shootPuck(ent); // Slower shooting frequency
                 }
             }
         }
@@ -253,13 +254,14 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
         // Interactions with Puck
         const distToPuck = Math.hypot(ent.pos.x - puckRef.current.x, ent.pos.y - puckRef.current.y);
         
+        // Take possession
         if (!puckOwnerRef.current && distToPuck < 3) {
             puckOwnerRef.current = ent.id;
         }
         
         // Steal possession?
         if (puckOwnerRef.current && puckOwnerRef.current !== ent.id && distToPuck < 3) {
-             if (Math.random() < 0.02) {
+             if (Math.random() < 0.02) { // Reduced steal chance
                  puckOwnerRef.current = ent.id;
                  generateCommentary("Turnover!").then(setCommentary);
              }
@@ -273,8 +275,8 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
             if (distBetweenEnforcers < 5) {
               setIsScrapActive(true);
               setScrapEnforcer1(playerTeam.roster.find(p => p.id === ent.id)?.name || 'Home Enforcer');
-              setScrapEnforcer2(enemyTeamName + ' Enforcer');
-              scrapCooldownRef.current = 600;
+              setScrapEnforcer2(enemyTeamName + ' Enforcer'); // Generic name for enemy enforcer
+              scrapCooldownRef.current = 600; // 10 seconds cooldown
               generateCommentary("A scrap has broken out!").then(setCommentary);
               break;
             }
@@ -292,13 +294,14 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
     if (puckOwnerRef.current) {
         const owner = entitiesRef.current.find(e => e.id === puckOwnerRef.current);
         if (owner) {
+            // Dribble: Stick puck slightly in front of velocity
             const offsetDist = 2;
             const angle = Math.atan2(owner.vel.y, owner.vel.x || (owner.team === 'home' ? 1 : -1));
             puckRef.current.x = owner.pos.x + Math.cos(angle) * offsetDist;
             puckRef.current.y = owner.pos.y + Math.sin(angle) * offsetDist;
             puckVelRef.current = { x: owner.vel.x, y: owner.vel.y };
         } else {
-            puckOwnerRef.current = null;
+            puckOwnerRef.current = null; // Owner not found fallback
         }
     } else {
         // Free Puck
@@ -312,34 +315,38 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
         if (puckRef.current.x < 0 || puckRef.current.x > 100) puckVelRef.current.x *= -1;
     }
 
-    // 4. Goal Check - Updated to check goal net areas (x=0-5% or x=95-100%, y=35-65%)
-    if (puckRef.current.x < 5 && puckRef.current.y > 35 && puckRef.current.y < 65) {
+    // 4. Goal Check
+    if (puckRef.current.x < 2 && Math.abs(puckRef.current.y - 50) < 10) {
         setScore(s => ({ ...s, away: s.away + 1 }));
         resetPositions();
         generateCommentary("They scored! 10-ply goaltending!").then(setCommentary);
         return;
     }
-    if (puckRef.current.x > 95 && puckRef.current.y > 35 && puckRef.current.y < 65) {
+    if (puckRef.current.x > 98 && Math.abs(puckRef.current.y - 50) < 10) {
         setScore(s => ({ ...s, home: s.home + 1 }));
         resetPositions();
         generateCommentary("Bardownski! What a snipe!").then(setCommentary);
         return;
     }
 
-    setGameEntities([...entitiesRef.current]);
+    setGameEntities([...entitiesRef.current]); // Trigger re-render
     requestRef.current = requestAnimationFrame(update);
   };
 
   const shootPuck = (shooter: Entity) => {
       puckOwnerRef.current = null;
+      // Shoot towards goal or in movement direction
       const goalX = shooter.team === 'home' ? 100 : 0;
       const goalY = 50;
       
+      // Calculate angle to goal but add some randomness based on velocity
       let angle = Math.atan2(goalY - shooter.pos.y, goalX - shooter.pos.x);
       
-      const chemistryEffect = (100 - shooter.gameStats.chemistry) / 100;
+      // Apply chemistry effect on shot angle randomness
+      const chemistryEffect = (100 - shooter.gameStats.chemistry) / 100; // 0 to 1, lower chemistry = more randomness
       angle += (Math.random() - 0.5) * 0.2 * chemistryEffect;
 
+      // If moving fast, bias towards movement direction
       if (Math.hypot(shooter.vel.x, shooter.vel.y) > 0.1) {
           const moveAngle = Math.atan2(shooter.vel.y, shooter.vel.x);
           angle = (angle + moveAngle) / 2;
@@ -351,66 +358,17 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
       };
   };
 
-  const passPuck = (passer: Entity) => {
-      let nearestTeammate: Entity | null = null;
-      let minDist = Infinity;
-
-      entitiesRef.current.forEach(ent => {
-          if (ent.team === passer.team && ent.id !== passer.id) {
-              const dist = Math.hypot(ent.pos.x - passer.pos.x, ent.pos.y - passer.pos.y);
-              if (dist < minDist) {
-                  minDist = dist;
-                  nearestTeammate = ent;
-              }
-          }
-      });
-
-      if (nearestTeammate) {
-          puckOwnerRef.current = null;
-          const dx = nearestTeammate.pos.x - passer.pos.x;
-          const dy = nearestTeammate.pos.y - passer.pos.y;
-          const dist = Math.hypot(dx, dy);
-
-          if (dist > 0) {
-              const chemistryEffect = passer.gameStats.chemistry / 100;
-              const randomAngle = (Math.random() - 0.5) * 0.3 * (1 - chemistryEffect);
-              const angle = Math.atan2(dy, dx) + randomAngle;
-
-              puckVelRef.current = {
-                  x: Math.cos(angle) * SHOOT_FORCE * 0.7,
-                  y: Math.sin(angle) * SHOOT_FORCE * 0.7
-              };
-              generateCommentary("Nice pass!").then(setCommentary);
-          }
-      }
-  };
-
-  const handleShootButton = () => {
-      const userPlayer = entitiesRef.current.find(e => e.team === 'home' && playerTeam.roster.some(p => p.id === e.id));
-      if (userPlayer && puckOwnerRef.current === userPlayer.id) {
-          shootPuck(userPlayer);
-          generateCommentary("He shoots!").then(setCommentary);
-      }
-  };
-
-  const handlePassButton = () => {
-      const userPlayer = entitiesRef.current.find(e => e.team === 'home' && playerTeam.roster.some(p => p.id === e.id));
-      if (userPlayer && puckOwnerRef.current === userPlayer.id && passCooldownRef.current <= 0) {
-          passPuck(userPlayer);
-          passCooldownRef.current = 30;
-      }
-  };
-
   const resetPositions = () => {
     puckRef.current = { x: 50, y: 50 };
     puckVelRef.current = { x: 0, y: 0 };
     puckOwnerRef.current = null;
     
+    // Reset players slightly and their gameStats
     entitiesRef.current.forEach((e, i) => {
          e.vel = { x: 0, y: 0 };
          e.isStunned = 0;
          e.isShielded = 0;
-         e.gameStats = { swagger: 0, heat: 0, trust: 0, chemistry: 0 };
+         e.gameStats = { swagger: 0, heat: 0, trust: 0, chemistry: 0 }; // Reset gameStats
          if (e.team === 'home') {
              e.pos = { x: 20, y: 30 + (i * 20) };
          } else {
@@ -422,7 +380,7 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
   useEffect(() => {
     requestRef.current = requestAnimationFrame(update);
     return () => cancelAnimationFrame(requestRef.current!); 
-  }, [score, time, isScrapActive]);
+  }, [score, time, isScrapActive]); // Re-run effect if score or time changes
 
   const userPlayerForHUD = playerTeam.roster.find(p => p.id === entitiesRef.current.find(e => e.team === 'home' && playerTeam.roster.some(p => p.id === e.id))?.id);
 
@@ -435,14 +393,9 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
     <div className="relative w-full h-full bg-gradient-to-b from-gray-800 to-gray-900 overflow-hidden">
       {/* Ice Rink */}
       <div className="absolute inset-0 bg-blue-200 opacity-20"></div>
-      <div className="absolute inset-y-0 left-1/2 w-1 bg-white opacity-50"></div>
-      <div className="absolute inset-y-0 left-[5%] w-1 bg-red-500 opacity-50"></div>
-      <div className="absolute inset-y-0 right-[5%] w-1 bg-red-500 opacity-50"></div>
-
-      {/* Goal Nets - Home (left) - Visible rectangular nets */}
-      <div className="absolute top-[35%] left-0 w-[5%] h-[30%] border-2 border-gray-300 bg-gray-400/10 rounded-sm"></div>
-      {/* Goal Nets - Away (right) - Visible rectangular nets */}
-      <div className="absolute top-[35%] right-0 w-[5%] h-[30%] border-2 border-gray-300 bg-gray-400/10 rounded-sm"></div>
+      <div className="absolute inset-y-0 left-1/2 w-1 bg-white opacity-50"></div> {/* Center Line */}
+      <div className="absolute inset-y-0 left-[5%] w-1 bg-red-500 opacity-50"></div> {/* Home Goal Line */}
+      <div className="absolute inset-y-0 right-[5%] w-1 bg-red-500 opacity-50"></div> {/* Away Goal Line */}
 
       {/* Puck */}
       <div
@@ -483,8 +436,6 @@ export const MatchView: React.FC<MatchViewProps> = ({ playerTeam, enemyTeamName,
           time={time}
           commentary={commentary}
           cooldowns={userCooldownsRef.current}
-          onShoot={handleShootButton}
-          onPass={handlePassButton}
         />
       )}
 
